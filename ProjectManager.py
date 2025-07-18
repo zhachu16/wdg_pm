@@ -8,6 +8,11 @@ from pathlib import Path
 import shutil
 import pandas as pd
 
+
+# TODO: Implement _update_volume() method
+# TODO: Implement check_feasibility() method --> checks if the model is 3D printable
+
+
 @dataclass
 class Project:
     """
@@ -341,6 +346,10 @@ class ProjectManager:
             quantity=quantity,
         )
         project_id = project.get_project_id()
+        if project_id in self.projects_index.index:
+            print(f"[ERROR] Cannot create duplicate project: '{project_id}' already exists.")
+            return
+
         project_path = self._project_path(project_id, create_if_missing=True)
         self.projects_index.loc[project_id, "status"] = project.status
         self.projects_index.loc[project_id, "filename"] = project_path.name
