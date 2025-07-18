@@ -117,8 +117,9 @@ class Project:
             f"Project ID changed from {old_project_id} to {new_project_id}"
         )
 
-    def update_file(self, new_file: Path, new_version: bool = False) -> None:
+    def update_file(self, new_file: str, new_version: bool = False) -> None:
         """Update the file path, optionally versioning it."""
+        new_file = Path(new_file)
         if not new_file.exists():
             raise FileNotFoundError(f"File {new_file} does not exist")
         if new_file == self.file:
@@ -144,13 +145,14 @@ class Project:
                 f"{timestamp}: File updated (same version), new volume {self.volume}"
             )
 
-    def update_file_directories(self, new_file_path: Optional[Path] = None, new_archive_path: Optional[Path] = None) -> None:
+    def update_file_directories(self, new_file_path: Optional[str] = None, new_archive_path: Optional[str] = None) -> None:
         """Update the directories for active files and archive."""
         if new_file_path is None and new_archive_path is None:
             raise ValueError("Must provide at least one new path")
         timestamp = datetime.now().isoformat()
 
         if new_file_path is not None:
+            new_file_path = Path(new_file_path)
             self._file_change_count += 1
             new_file_path.mkdir(parents=True, exist_ok=True)
             target_file = new_file_path / self.file.name
@@ -160,6 +162,7 @@ class Project:
                 f"{timestamp}: File directory changed to {new_file_path}"
             )
         if new_archive_path is not None:
+            new_archive_path = Path(new_archive_path)
             self._file_change_count += 1
             new_archive_path.mkdir(parents=True, exist_ok=True)
             for archived_file in self.archive_directory.iterdir():
@@ -324,16 +327,16 @@ class ProjectManager:
         self,
         master_id: str,
         sub_id: int,
-        file: Path,
-        archive_directory: Path,
+        file: str,
+        archive_directory: str,
         responsible: Dict[str, List[str]],
         quantity: int = 1
     ) -> None:
         project = Project(
             master_id=master_id,
             sub_id=sub_id,
-            file=file,
-            archive_directory=archive_directory,
+            file=Path(file),
+            archive_directory=Path(archive_directory),
             responsible=responsible,
             quantity=quantity,
         )
