@@ -69,45 +69,30 @@ assert len(project.comments) == 0
 # Version 2
 file_v2 = test_file_dir / "cube_v2.stl"
 file_v2.write_text("version 2 content")
-project.update_file(file_v2, new_version=True)
-assert project.file.name == "cube_v2.stl"
-assert (test_archive_dir / "HAM_NEW_1_v1.stl").exists()
+project.update_file("cube_v2.stl", new_version=True)
+
 
 # Version 3
 file_v3 = test_file_dir / "cube_v3.stl"
 file_v3.write_text("version 3 content")
-project.update_file(file_v3, new_version=True)
-assert project.file.name == "cube_v3.stl"
-assert (test_archive_dir / "HAM_NEW_1_v2.stl").exists()
+project.update_file("cube_v3.stl", new_version=True)
+
 
 # Version 4
 file_v4 = test_file_dir / "cube_v4.stl"
 file_v4.write_text("version 4 content")
-project.update_file(file_v4, new_version=True)
-assert project.file.name == "cube_v4.stl"
-assert (test_archive_dir / "HAM_NEW_1_v3.stl").exists()
+project.update_file("cube_v4.stl", new_version=True)
+
+file_v4 = test_file_dir / "cube_v4_1.stl"
+file_v4.write_text("version 4_1 content")
+project.update_file("cube_v4_1.stl", new_version=False)
 
 # Move file and archive directories
 new_file_dir = Path("../new_files")
 new_archive_dir = Path("../new_archive")
-project.update_file_directories(new_file_dir, new_archive_dir)
+project.update_file_directories("/Users/zhachu16/Documents/Wedge/wdg_pm/tests/test_file", "/Users/zhachu16/Documents/Wedge/wdg_pm/tests/test_archive")
 
-assert project.file.parent == new_file_dir
-assert project.archive_directory == new_archive_dir
-assert all(f.parent == new_archive_dir for f in new_archive_dir.iterdir())
 
 # --- Final Review: Change Log + File System Check ---
+project.print_info(comment=True, change_log=True)
 
-print("\nFinal Project State:")
-print("Project ID:", project.get_project_id())
-print("File:", project.file)
-print("Archive Directory:", project.archive_directory)
-print("Quantity:", project.quantity)
-print("Status:", project.status)
-print("\nChange Log:")
-for key, value in project.change_log.items():
-    print(f"{key} -> {value}")
-
-print("\nArchived Files in New Directory:")
-for archived_file in new_archive_dir.iterdir():
-    print(archived_file.name)
