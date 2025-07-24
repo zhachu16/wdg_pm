@@ -8,6 +8,13 @@ from pathlib import Path
 import shutil
 import pandas as pd
 
+
+# TODO: Implement _update_volume() method
+# TODO: Implement view() method
+# TODO: Integrate logistics api
+# TODO: Implement check_feasibility() method --> checks if the model is 3D printable
+
+
 @dataclass
 class Project:
     """
@@ -20,7 +27,7 @@ class Project:
         file (Path): Path to the current print file (.stl or .obj). Must include directory and filename.
         archive_directory (Path): Directory for storing archived versions of print files.
         status (str): Current project status. Defaults to 'Created'.
-        responsible (Dict[str, List[str]]): Dictionary mapping responsibility types to individuals.
+        responsibility (Dict[str, List[str]]): Dictionary mapping responsibility types to individuals.
         quantity (int): Number of copies to be printed.
         volume (float): Volume for cost calculation, in cubic units.
 
@@ -36,7 +43,7 @@ class Project:
     sub_id: int
     file: Path
     archive_directory: Path
-    responsible: Dict[str, List[str]]
+    responsibility: Dict[str, List[str]]
     quantity: int
     volume: float = 0.0
     status: str = 'Created'
@@ -56,7 +63,7 @@ class Project:
     _id_change_count: int = 0
     _file_change_count: int = 0
     _status_change_count: int = 0
-    _responsible_change_count: int = 0
+    _responsibility_change_count: int = 0
     _quantity_change_count: int = 0
     _name_change_count: int = 0
     _customer_change_count: int = 0
@@ -113,8 +120,19 @@ class Project:
         self.master_id = new_master_id
         new_project_id = self.get_project_id()
         self.change_log[f"Project ID Change #{self._id_change_count}"] = (
-            f"{timestamp}: Subproject moved under master project {new_master_id}. "
+            f"{timestamp}: Project moved under master project {new_master_id}. "
             f"Project ID changed from {old_project_id} to {new_project_id}"
+        )
+
+    def update_sub_id(self, new_sub_id: int) -> None:
+        """Update the master project ID."""
+        self._id_change_count += 1
+        timestamp = datetime.now().isoformat()
+        old_project_id = self.get_project_id()
+        self.sub_id = new_sub_id
+        new_project_id = self.get_project_id()
+        self.change_log[f"Project ID Change #{self._id_change_count}"] = (
+            f"{timestamp}: Project ID changed from {old_project_id} to {new_project_id}. "
         )
 
     def update_file(self, new_file: str, new_version: bool = False) -> None:
@@ -166,7 +184,7 @@ class Project:
             self._file_change_count += 1
             new_archive_path.mkdir(parents=True, exist_ok=True)
             for archived_file in self.archive_directory.iterdir():
-                if archived_file.is_file():
+                if archived_file.is_file()and archived_file.suffix.lower() in {".stl", ".obj"}:
                     target_file = new_archive_path / archived_file.name
                     shutil.move(str(archived_file), str(target_file))
             self.archive_directory = new_archive_path
@@ -183,13 +201,22 @@ class Project:
             f"{timestamp} Status changed to {new_status}"
         )
 
-    def update_responsible(self, responsible_type: str, responsible: List[str]) -> None:
-        """Update the responsible persons for a specific responsibility type."""
-        self._responsible_change_count += 1
+    def update_responsibility(self, responsibility_type: str, responsible: List[str]) -> None:
+        """Update the responsible for a specific responsibility type."""
+        self._responsibility_change_count += 1
         timestamp = datetime.now().isoformat()
-        self.responsible[responsible_type] = responsible
-        self.change_log[f"Responsible Change #{self._responsible_change_count}"] = (
-            f"{timestamp}: {responsible_type} updated to {responsible}"
+        self.responsibility[responsibility_type] = responsible
+        self.change_log[f"responsibility Change #{self._responsibility_change_count}"] = (
+            f"{timestamp}: {responsibility_type} updated to {responsible}"
+        )
+
+    def delete_responsibility(self, responsibility_type: str) -> None:
+        """Delete the responsibility persons for a specific responsibility type."""
+        self._responsibility_change_count += 1
+        timestamp = datetime.now().isoformat()
+        self.responsibility.pop(responsibility_type, None)
+        self.change_log[f"responsibility Change #{self._responsibility_change_count}"] = (
+            f"{timestamp}: responsibility type {responsibility_type} deleted."
         )
 
     def _update_volume(self) -> None:
@@ -263,7 +290,7 @@ class Project:
             "Volume": self.volume,
             "File": self.file,
             "Archive Directory": self.archive_directory,
-            "Responsible": self.responsible,
+            "responsibility": self.responsibility,
             "Shipping Info": self.shipping_info,
             "Comments": self.comments
         }
@@ -329,7 +356,7 @@ class ProjectManager:
         sub_id: int,
         file: str,
         archive_directory: str,
-        responsible: Dict[str, List[str]],
+        responsibility: Dict[str, List[str]],
         quantity: int = 1
     ) -> None:
         project = Project(
@@ -337,10 +364,14 @@ class ProjectManager:
             sub_id=sub_id,
             file=Path(file),
             archive_directory=Path(archive_directory),
-            responsible=responsible,
+            responsibility=responsibility,
             quantity=quantity,
         )
         project_id = project.get_project_id()
+        if project_id in self.projects_index.index:
+            print(f"[ERROR] Cannot create duplicate project: '{project_id}' already exists.")
+            return
+
         project_path = self._project_path(project_id, create_if_missing=True)
         self.projects_index.loc[project_id, "status"] = project.status
         self.projects_index.loc[project_id, "filename"] = project_path.name
@@ -414,18 +445,47 @@ class ProjectManager:
             print(f"[ERROR] Failed to apply '{action}' to {project_id}: {e}")
             return
 
-        self.projects_index.loc[project_id, "status"] = project.status
+        new_project_id = project.get_project_id()
+        new_filename = hashlib.md5(new_project_id.encode()).hexdigest() + ".pkl"
+        new_path = self.projects_dir / new_filename
 
         try:
-            with open(self._project_path(project_id), "wb") as f:
+            # Save project to new file
+            with open(new_path, "wb") as f:
                 pickle.dump(project, f)
+
+            # Update index
+            if new_project_id != project_id:
+                # Remove old entry
+                if project_id in self.projects_index.index:
+                    old_path = self._project_path(project_id)
+                    self.projects_index.drop(index=project_id, inplace=True, errors="ignore")
+                    if old_path.exists():
+                        old_path.unlink()
+                        print(f"[INFO] Project id updated from {project_id} to {new_project_id}.")
+
+                # Add new entry
+                self.projects_index.loc[new_project_id] = [new_filename, project.status]
+            else:
+                # Update status only
+                self.projects_index.loc[project_id, "status"] = project.status
+
             self._update_index()
-            print(f"[INFO] Project {project_id} updated successfully via '{action}'.")
+            print(f"[INFO] Project {new_project_id} updated successfully via '{action}'.")
+
         except Exception as e:
-            print(f"[ERROR] Failed to save updated project {project_id}: {e}")
+            print(f"[ERROR] Failed to save updated project {new_project_id}: {e}")
 
     def get_project_list(self) -> List[str]:
         return self.projects_index.index.tolist()
+
+    def get_project_change_log(self, project_id: str, show_in_terminal: bool = False) -> Dict[str, str]:
+        project = self._get_project(project_id)
+        change_log = project.change_log
+        print("[INFO] Getting project change log...")
+        if show_in_terminal:
+            project.print_change_log()
+        return change_log
 
     def get_project_info(self, project_id: str) -> dict:
         project = self._get_project(project_id)
