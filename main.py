@@ -1,13 +1,12 @@
 import tkinter as tk
 from tkinter import filedialog, messagebox, simpledialog
-from config import PROJECTS_DIR, INDEX_FILE
+from config import PROJECTS_DIR, INDEX_FILE, UPDATE_METHODS
 from ProjectManager import ProjectManager
 import sys
 
 
-#TODO: Add update_project button: edit project via the .update_ method
 #TODO: Add view button, open project file and view stl
-
+#TODO: Add edit comment button
 
 class TextRedirector:
     """
@@ -24,24 +23,46 @@ class TextRedirector:
         pass  # Required for compatibility with sys.stdout
 
 
-def get_responsible_dict():
+def get_responsibility_dict(single_pair: bool=False):
     """
-    Prompt user to input responsibility roles and associated people.
+    Prompt user to input responsibility roles and associated people/companies.
     """
-    responsible = {}
-    while True:
-        resp_type = simpledialog.askstring(
-            "Responsible Type",
-            "Enter responsibility type (e.g., Design, Production) or leave blank to finish:"
-        )
+    if single_pair:
+        resp_type = simpledialog.askstring("Responsibility Type",
+                                           "Enter responsibility type (e.g. Designer, Factory, Shipping):",
+                                           parent=root)
         if not resp_type:
-            break
-        people = simpledialog.askstring(
+            return
+
+        people_str = simpledialog.askstring(
             "People Responsible",
-            f"List people responsible for {resp_type} (comma-separated):"
+            f"List people/companies responsible for {resp_type} (comma separated), or leave blank to abort:",
+            parent=root
         )
-        responsible[resp_type] = [name.strip() for name in people.split(",")] if people else []
-    return responsible
+        if people_str is None:
+            return
+        people_list = [name.strip() for name in people_str.split(",") if name.strip()]
+        if not people_list:
+            return
+
+        responsibility = {"responsibility_type": resp_type, "responsible": people_list}
+        return responsibility
+
+    else:
+        responsibility = {}
+        while True:
+            resp_type = simpledialog.askstring(
+                "responsibility Type",
+                "Enter responsibility type (e.g., Design, Production) or leave blank to finish:"
+            )
+            if not resp_type:
+                break
+            people = simpledialog.askstring(
+                "People Responsible",
+                f"List people/company responsible for {resp_type} (comma-separated):"
+            )
+            responsibility[resp_type] = [name.strip() for name in people.split(",")] if people else []
+        return responsibility
 
 
 def create_project():
@@ -59,27 +80,99 @@ def create_project():
         messagebox.showwarning("Missing Input", "Sub ID is required.")
         return
 
-    messagebox.showinfo("Select Project File", "Only .stl or .obj files are supported.")
+    messagebox.showinfo("Project File", "Select Project file")
     file_path = filedialog.askopenfilename(title="Select .stl or .obj File")
     if not file_path:
         messagebox.showwarning("Missing Input", "A project file is required.")
         return
 
-    messagebox.showinfo("Select Archive Directory", "Select the directory where archived files are stored.")
+    messagebox.showinfo("Archive Directory", "Select the directory where archived files are stored.")
     archive_dir = filedialog.askdirectory()
     if not archive_dir:
         messagebox.showwarning("Missing Input", "An archive directory is required.")
         return
 
-    responsible = get_responsible_dict()
+    responsibility = get_responsibility_dict()
 
     quantity = simpledialog.askinteger("Input", "Quantity to produce")
     if quantity is None:
         messagebox.showwarning("Missing Input", "Quantity is required.")
         return
 
-    pm.create_project(master_id, sub_id, file_path, archive_dir, responsible, quantity)
+    pm.create_project(master_id, sub_id, file_path, archive_dir, responsibility, quantity)
     refresh_project_list()
+
+
+def edit():
+    selected = listbox.get(tk.ACTIVE)
+    if not selected:
+        messagebox.showwarning("No Selection", "Select a project to edit.")
+        return
+
+    # --- Create a popup window for selection ---
+    popup = tk.Toplevel(root)
+    popup.title("Select Update Method")
+    popup.geometry("300x200")
+    popup.grab_set()  # Modal window
+
+    tk.Label(popup, text="Select method to update:").pack(pady=10)
+
+    selected_method = tk.StringVar(popup)
+    selected_method.set(UPDATE_METHODS[0])  # Default selection
+
+    tk.OptionMenu(popup, selected_method, *UPDATE_METHODS).pack(pady=5)
+
+    def on_confirm():
+        action = selected_method.get()
+        popup.destroy()
+
+        # Handle 'update_responsibility' separately
+        if action == "update_responsibility":
+            info = get_responsibility_dict(single_pair=True)
+            if info:
+                pm.update_project(selected, action, info)
+                refresh_project_list()
+            return
+
+        elif action == "update_file":
+            messagebox.showinfo("Project File", "Select new project file")
+            new_file = filedialog.askopenfilename(title="Select .stl or .obj File")
+            if not new_file:
+                messagebox.showwarning("Missing Input", "A project file is required.")
+                return
+            new_version = messagebox.askyesno("New Version", "Is this a new version?")
+            info = {"new_file": new_file, "new_version": new_version}
+
+        elif action == "update_file_directories":
+            update_file_dir = messagebox.askyesno("New File path",
+                                                  "Do you wish to update file directories?")
+            if update_file_dir:
+                new_file_path = filedialog.askdirectory(title="Select new file directories")
+            else:
+                new_file_path = None
+
+            update_archive_dir = messagebox.askyesno("New archive path",
+                                                     "Do you wish to update archive directories?")
+            if update_archive_dir:
+                new_archive_path = filedialog.askdirectory(title="Select new archive directories")
+            else:
+                new_archive_path = None
+
+            info = {"new_file_path": new_file_path, "new_archive_path": new_archive_path}
+
+        else:
+            # Default: ask for a single value
+            info_str = simpledialog.askstring("New Value", f"Enter new value for '{action}':", parent=root)
+            if info_str is None:
+                return
+
+            try:
+                info = eval(info_str, {"__builtins__": {}})
+            except Exception:
+                info = info_str
+
+        pm.update_project(selected, action, info)
+        refresh_project_list()
 
 
 def refresh_project_list():
@@ -103,6 +196,37 @@ def show_project_info():
     messagebox.showinfo(f"Project Info: {selected}", info_str)
 
 
+def get_project_change_log():
+    """"""
+    selected = listbox.get(tk.ACTIVE)
+    if not selected:
+        return
+    info = pm.get_project_change_log(selected)
+    if not info:
+        messagebox.showinfo("Change Log", "No change log found for this project.")
+        return
+
+    # Format the log as a multiline string
+    log_str = "\n".join(f"{cid}: {desc}" for cid, desc in info.items())
+
+    # Show in a scrollable popup
+    log_popup = tk.Toplevel(root)
+    log_popup.title(f"Change Log: {selected}")
+    log_popup.geometry("400x300")
+    log_popup.grab_set()
+
+    tk.Label(log_popup, text="Change Log", font=("Arial", 12, "bold")).pack(pady=5)
+
+    text_widget = tk.Text(log_popup, wrap=tk.WORD)
+    text_widget.insert(tk.END, log_str)
+    text_widget.config(state=tk.DISABLED)
+    text_widget.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
+
+    scrollbar = tk.Scrollbar(text_widget, command=text_widget.yview)
+    text_widget.config(yscrollcommand=scrollbar.set)
+    scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+
+
 def delete_project():
     """
     Delete the selected project after confirmation from the user.
@@ -117,43 +241,49 @@ def delete_project():
         refresh_project_list()
 
 
-# --- Initialize ProjectManager ---
-pm = ProjectManager(index_file=INDEX_FILE, projects_dir=PROJECTS_DIR)
+if __name__ == "__main__":
 
-# --- GUI Setup ---
-root = tk.Tk()
-root.title("Project Manager GUI")
+    # --- Initialize ProjectManager ---
+    pm = ProjectManager(index_file=INDEX_FILE, projects_dir=PROJECTS_DIR)
 
-btn_create = tk.Button(root, text="Create Project", command=create_project)
-btn_create.pack()
+    # --- GUI Setup ---
+    root = tk.Tk()
+    root.title("Project Manager GUI")
 
-btn_refresh = tk.Button(root, text="Refresh Project List", command=refresh_project_list)
-btn_refresh.pack()
+    btn_create = tk.Button(root, text="Create Project", command=create_project)
+    btn_create.pack()
 
-listbox = tk.Listbox(root)
-listbox.pack(fill=tk.BOTH, expand=True)
+    btn_delete = tk.Button(root, text="Delete Project", command=delete_project)
+    btn_delete.pack()
 
-btn_info = tk.Button(root, text="Show Project Info", command=show_project_info)
-btn_info.pack()
+    btn_edit = tk.Button(root, text="Edit Project", command=edit)
+    btn_edit.pack()
 
-btn_delete = tk.Button(root, text="Delete Project", command=delete_project)
-btn_delete.pack()
+    listbox = tk.Listbox(root)
+    listbox.pack(fill=tk.BOTH, expand=True)
 
-log_frame = tk.Frame(root)
-log_frame.pack(fill=tk.BOTH, expand=True)
+    btn_info = tk.Button(root, text="Show Project Info", command=show_project_info)
+    btn_info.pack()
 
-log_label = tk.Label(log_frame, text="Console Output:")
-log_label.pack(anchor="w")
+    btn_log = tk.Button(root, text="View Change Log", command=get_project_change_log)
+    btn_log.pack()
 
-log_text = tk.Text(log_frame, height=10, bg="black", fg="white")
-log_text.pack(fill=tk.BOTH, expand=True)
+    log_frame = tk.Frame(root)
+    log_frame.pack(fill=tk.BOTH, expand=True)
 
-# Redirect stdout and stderr to the GUI console
-sys.stdout = TextRedirector(log_text)
-sys.stderr = TextRedirector(log_text)
+    log_label = tk.Label(log_frame, text="Console Output:")
+    log_label.pack(anchor="w")
 
-# Populate the project list initially
-refresh_project_list()
+    log_text = tk.Text(log_frame, height=10, bg="black", fg="white")
+    log_text.pack(fill=tk.BOTH, expand=True)
 
-# Start the GUI event loop
-root.mainloop()
+    # Redirect stdout and stderr to the GUI console
+    sys.stdout = TextRedirector(log_text)
+    sys.stderr = TextRedirector(log_text)
+
+    # Populate the project list initially
+    refresh_project_list()
+
+    # Start the GUI event loop
+    root.mainloop()
+
