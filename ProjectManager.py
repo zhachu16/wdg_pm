@@ -7,6 +7,9 @@ from typing import Optional, Dict, List, Union
 from pathlib import Path
 import shutil
 import pandas as pd
+import subprocess
+import trimesh
+from config import RHINO_DIR
 
 
 # TODO: Implement _update_volume() method
@@ -77,6 +80,11 @@ class Project:
     def get_file_version(self) -> str:
         """Return the file version string."""
         return f"{self.get_project_id()}_v{self._file_version}"
+
+    def _get_mesh(self):
+        file = str(self.file)
+        mesh = trimesh.load(file)
+        return mesh
 
     def add_comment(self, comment: str) -> None:
         """Add a timestamped comment."""
@@ -163,7 +171,8 @@ class Project:
                 f"{timestamp}: File updated (same version), new volume {self.volume}"
             )
 
-    def update_file_directories(self, new_file_path: Optional[str] = None, new_archive_path: Optional[str] = None) -> None:
+    def update_file_directories(self, new_file_path: Optional[str] = None,
+                                new_archive_path: Optional[str] = None) -> None:
         """Update the directories for active files and archive."""
         if new_file_path is None and new_archive_path is None:
             raise ValueError("Must provide at least one new path")
@@ -184,7 +193,7 @@ class Project:
             self._file_change_count += 1
             new_archive_path.mkdir(parents=True, exist_ok=True)
             for archived_file in self.archive_directory.iterdir():
-                if archived_file.is_file()and archived_file.suffix.lower() in {".stl", ".obj"}:
+                if archived_file.is_file() and archived_file.suffix.lower() in {".stl", ".obj"}:
                     target_file = new_archive_path / archived_file.name
                     shutil.move(str(archived_file), str(target_file))
             self.archive_directory = new_archive_path
@@ -221,8 +230,20 @@ class Project:
 
     def _update_volume(self) -> None:
         """Update the volume from the 3D file (currently placeholder)."""
-        # TODO: Implement actual 3D model volume extraction.
-        self.volume = 0.0  # Placeholder
+        mesh = self._get_mesh()
+        if mesh.is_watertight:
+            volume = mesh.volume
+            self.volume = float(volume)
+        else:
+            print("Mesh is not watertight. Attempting to fix...")
+            mesh.fill_holes()  # Fill holes
+            mesh.fix_normals()  # Ensure consistent normals
+            if mesh.is_watertight:
+                volume = mesh.volume
+                print(f"Repair successful, volume updated.")
+                self.volume = float(volume)
+            else:
+                print("Could not make mesh watertight. Volume may be incorrect.")
 
     def update_quantity(self, new_quantity: int) -> None:
         """Update the quantity to produce."""
@@ -308,7 +329,6 @@ class Project:
             self.print_change_log()
 
 
-
 class ProjectManager:
     def __init__(self, index_file: Path, projects_dir: Path):
         self.index_file = index_file
@@ -351,13 +371,13 @@ class ProjectManager:
             print(f"[ERROR] Failed to save project index: {e}")
 
     def create_project(
-        self,
-        master_id: str,
-        sub_id: int,
-        file: str,
-        archive_directory: str,
-        responsibility: Dict[str, List[str]],
-        quantity: int = 1
+            self,
+            master_id: str,
+            sub_id: int,
+            file: str,
+            archive_directory: str,
+            responsibility: Dict[str, List[str]],
+            quantity: int = 1
     ) -> None:
         project = Project(
             master_id=master_id,
@@ -367,6 +387,7 @@ class ProjectManager:
             responsibility=responsibility,
             quantity=quantity,
         )
+        project._update_volume()
         project_id = project.get_project_id()
         if project_id in self.projects_index.index:
             print(f"[ERROR] Cannot create duplicate project: '{project_id}' already exists.")
@@ -487,6 +508,14 @@ class ProjectManager:
             project.print_change_log()
         return change_log
 
+    def get_project_comments(self, project_id: str, show_in_terminal: bool = False) -> Dict[str, str]:
+        project = self._get_project(project_id)
+        comments = project.comments
+        print("[INFO] Getting project comments...")
+        if show_in_terminal:
+            project.print_comments()
+        return comments
+
     def get_project_info(self, project_id: str) -> dict:
         project = self._get_project(project_id)
         return project.get_info()
@@ -494,3 +523,18 @@ class ProjectManager:
     def print_project_info(self, project_id: str, comment: bool = False, change_log: bool = False) -> None:
         project = self._get_project(project_id)
         project.print_info(comment=comment, change_log=change_log)
+
+    def view_project(self, project_id: str, method: str = "default") -> None:
+        project = self._get_project(project_id)
+        if method == "default":
+            mesh = project._get_mesh()
+            mesh.show()
+        elif method == "rhino":
+            full_path = str(project.file)
+            command = [
+                RHINO_DIR,
+                "/nosplash",
+                "/runscript=_-Import \"" + full_path + "\" _Enter _Enter"
+            ]
+            print(f"[INFO] Opening project in Rhino...")
+            subprocess.Popen(command)
